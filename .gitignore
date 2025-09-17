@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Streamlit
+.streamlit/
+
+# Data and weights
+runs/
+weights/
+data/
+export/
+
+# Datasets (large)
+datasets/
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+logs/
+*.log

@@ -1,0 +1,14 @@
+ultralytics==8.3.27
+fiftyone==0.23.6
+opencv-python==4.10.0.84
+numpy==1.26.4
+pillow==10.4.0
+PyYAML==6.0.2
+streamlit==1.38.0
+tqdm==4.66.5
+matplotlib==3.9.2
+scikit-image==0.24.0
+scipy==1.13.1
+shapely==2.0.6
+onnx==1.16.2
+onnxruntime==1.19.2
