@@ -29,6 +29,7 @@ class SubmissionCreate(SubmissionBase):
 class Submission(SubmissionBase):
     id: int
     owner_id: int
+    timestamp: str
     detections: List[Detection] = []
 
     class Config:

@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import shutil
 import os
+import uvicorn
 
 from . import crud, models, schemas, security, trash_detector
 from .database import SessionLocal, engine, create_db_and_tables
@@ -11,7 +13,20 @@ from .database import SessionLocal, engine, create_db_and_tables
 # Create database tables
 create_db_and_tables()
 
-app = FastAPI()
+app = FastAPI(
+    title="Trash Detection API",
+    description="API for trash detection and incentive system",
+    version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # React dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Dependency
 def get_db():
@@ -41,6 +56,14 @@ async def get_current_user(db: Session = Depends(get_db), token: str = Depends(o
     if user is None:
         raise credentials_exception
     return user
+
+async def get_current_admin_user(current_user: models.User = Depends(get_current_user)):
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    return current_user
 
 @app.post("/users/", response_model=schemas.User)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -113,6 +136,130 @@ def read_submissions(skip: int = 0, limit: int = 10, db: Session = Depends(get_d
     submissions = db.query(models.Submission).filter(models.Submission.owner_id == current_user.id).offset(skip).limit(limit).all()
     return submissions
 
+# Admin endpoints
+@app.get("/admin/users/", response_model=List[schemas.User])
+async def get_all_users(
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_admin_user)
+):
+    """Get all users (admin only)"""
+    return crud.get_users(db=db, skip=skip, limit=limit)
+
+@app.get("/admin/submissions/", response_model=List[schemas.Submission])
+async def get_all_submissions(
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_admin_user)
+):
+    """Get all submissions (admin only)"""
+    return crud.get_submissions(db=db, skip=skip, limit=limit)
+
+@app.post("/admin/users/{user_id}/toggle-active")
+async def toggle_user_active(
+    user_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_admin_user)
+):
+    """Toggle user active status (admin only)"""
+    user = crud.get_user(db=db, user_id=user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.is_active = not user.is_active
+    db.commit()
+    return {"message": f"User {user.username} active status: {user.is_active}"}
+
+@app.post("/admin/users/{user_id}/make-admin")
+async def make_user_admin(
+    user_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(get_current_admin_user)
+):
+    """Make user admin (admin only)"""
+    user = crud.get_user(db=db, user_id=user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user.is_superuser = True
+    db.commit()
+    return {"message": f"User {user.username} is now an admin"}
+
+# Leaderboard endpoint
+@app.get("/leaderboard/")
+def get_leaderboard(
+    limit: int = 10, 
+    db: Session = Depends(get_db)
+):
+    """Get top users by points"""
+    users = db.query(models.User).filter(models.User.is_active == True).order_by(models.User.points.desc()).limit(limit).all()
+    return [
+        {
+            "username": user.username,
+            "points": user.points,
+            "rank": i + 1
+        }
+        for i, user in enumerate(users)
+    ]
+
+# Statistics endpoint
+@app.get("/stats/")
+async def get_stats(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get user statistics"""
+    user_submissions = db.query(models.Submission).filter(models.Submission.owner_id == current_user.id).all()
+    
+    total_submissions = len(user_submissions)
+    total_points = sum(sub.score for sub in user_submissions)
+    
+    # Get user rank
+    users_above = db.query(models.User).filter(
+        models.User.points > current_user.points,
+        models.User.is_active == True
+    ).count()
+    user_rank = users_above + 1
+    
+    return {
+        "total_submissions": total_submissions,
+        "total_points": total_points,
+        "current_rank": user_rank,
+        "average_score": total_points / total_submissions if total_submissions > 0 else 0
+    }
+
+# Global statistics (admin only)
+@app.get("/admin/stats/")
+async def get_global_stats(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_admin_user)
+):
+    """Get global statistics (admin only)"""
+    total_users = db.query(models.User).filter(models.User.is_active == True).count()
+    total_submissions = db.query(models.Submission).count()
+    total_detections = db.query(models.Detection).count()
+    
+    # Get top 5 users
+    top_users = db.query(models.User).filter(models.User.is_active == True).order_by(models.User.points.desc()).limit(5).all()
+    
+    return {
+        "total_users": total_users,
+        "total_submissions": total_submissions,
+        "total_detections": total_detections,
+        "top_users": [
+            {
+                "username": user.username,
+                "points": user.points
+            }
+            for user in top_users
+        ]
+    }
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Trash Detection API"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
