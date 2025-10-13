@@ -1,5 +1,5 @@
 import torch
-from transformers import AdamW
+from torch.optim import AdamW
 
 from Trash_Detect.download_prepare_dataset import download_and_prepare_dataset
 from utils import DEVICE, MODEL_NAME, EPOCHS, LEARNING_RATE
