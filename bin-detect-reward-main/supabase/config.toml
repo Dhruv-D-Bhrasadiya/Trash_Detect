@@ -1,0 +1,4 @@
+project_id = "ohttaqzkjspyisplnwas"
+
+[functions.detect-trash]
+verify_jwt = true
